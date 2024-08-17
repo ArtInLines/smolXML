@@ -2,49 +2,116 @@ from __future__ import annotations
 
 # @TODO: Currently, any whitespace strings that are children of xml elements just get ignored. This is not desired, but not a huge issue atm
 
+class Cursor():
+	file: str = ""
+	row:  int = 0
+	col:  int = 1
+	def __init__(self, file: str, col: int, row: int):
+		self.file = file
+		self.col  = col
+		self.row  = row
+
+	def getPos(self) -> str:
+		return f"{self.col}:{self.row}"
+
+	def err(self, msg: str):
+		if self.file != "":
+			print(f"Error at {self.file}:{self.getPos()} - {msg}")
+		else:
+			print(f"Error at {self.getPos()} - {msg}")
+		exit(1)
+
+
 class StrBuf():
-	idx: int = 0
-	str: str = ""
+	idx:  int = 0
+	bol:  int = 0
+	col:  int = 1
+	str:  str = ""
+	file: str = ""
 	def __init__(self, str: str):
 		self.str = str
-		self.idx = 0
+
+	@staticmethod
+	def fromFile(fname: str) -> StrBuf:
+		with open(fname, "rb") as f:
+			s = f.read().decode("utf8")
+			sb = StrBuf(s)
+			sb.file = fname
+			return sb
+
+	def getCursor(self) -> Cursor:
+		return Cursor(self.file, self.col, self.idx - self.bol)
+
+	def err(self, msg: str):
+		self.getCursor().err(msg)
 
 	def isDone(self) -> bool:
 		return self.idx >= len(self.str)
 
+	def expectDone(self, expected: bool = True) -> StrBuf:
+		if self.isDone() != expected:
+			self.err("Expected file to be finished, but it continues")
+		return self
+
+	def expectReadable(self, n: int = 1) -> StrBuf:
+		if self.idx + n > len(self.str):
+			self.err("File ended unexpectedly")
+		return self
+
 	def peek(self, n: int = 1) -> str:
-		assert(self.idx + n <= len(self.str))
+		self.expectReadable(n)
 		return self.str[self.idx:self.idx+n]
+
+	def skipOne(self) -> StrBuf:
+		self.expectReadable()
+		if self.str[self.idx] == '\n':
+			self.col += 1
+			self.bol = self.idx + 1
+		self.idx += 1
+		return self
+
+	def skip(self, n: int = 1) -> StrBuf:
+		while n > 0:
+			self.skipOne()
+			n -= 1
+		return self
 
 	def read(self, n: int = 1) -> str:
 		res = self.peek(n)
-		self.idx += n
+		self.skip(n)
 		return res
+
+	def readExpected(self, expected: str) -> StrBuf:
+		s = self.read(len(expected))
+		if s != expected:
+			self.err("Expected '" + expected + "', but found '" + s + "'")
+		return self
 
 	def skipWhitespace(self) -> StrBuf:
 		while self.idx < len(self.str) and self.str[self.idx].isspace():
-			self.idx += 1
+			self.skipOne()
 		return self
 
+	# @TODO: Make sure this logs an error if "end" wasn't found
 	def skipUntil(self, end: str) -> StrBuf:
 		l = len(end)
 		while self.idx < len(self.str) and self.str[self.idx:self.idx+l] != end:
-			self.idx += 1
+			self.skipOne()
 		if self.idx < len(self.str):
-			self.idx += l
+			self.skip(l)
 		return self
 
 	def skipComments(self, start: str, end: str) -> StrBuf:
 		l = len(start)
 		cont = True
-		while self.str[self.idx:self.idx+l] == start:
-			self.idx += l
+		while self.idx < len(self.str) and self.str[self.idx:self.idx+l] == start:
+			self.skip(l)
 			self.skipUntil(end)
 		return self
 
 	def skipCommentsWhitespace(self, start: str, end: str) -> StrBuf:
 		i = -1
-		while i != self.idx:
+		while self.idx < len(self.str) and i != self.idx:
 			i = self.idx
 			self.skipWhitespace()
 			self.skipComments(start, end)
@@ -52,40 +119,53 @@ class StrBuf():
 
 	def alphaStrNumEx(self, allowedChars: str) -> str:
 		start = self.idx
-		while self.idx < len(self.str) and (self.str[self.idx].isalpha() or self.str[self.idx].isdigit() or self.str[self.idx] in allowedChars):
-			self.idx += 1
-		return self.str[start:self.idx]
+		while self.idx < len(self.str) and self.str[self.idx].isalpha() or self.str[self.idx].isdigit() or self.str[self.idx] in allowedChars:
+			self.skipOne()
+		res = self.str[start:self.idx]
+		if res == "":
+			msg = "Expected an alphanumeric string, but "
+			if self.idx >= len(self.str):
+				msg += "found end of file instead"
+			else:
+				msg += "found '" + self.str[self.idx] + "' instead"
+			self.err(msg)
+		return res
 
 	def alphaNumStr(self) -> str:
 		return self.alphaStrNumEx("")
 
 	def quotedStr(self) -> str:
-		assert(self.idx < len(self.str))
-		assert(self.str[self.idx] in ('"', "'"))
+		self.expectReadable()
+		startCursor = self.getCursor()
+		if self.str[self.idx] not in ('"', "'"):
+			startCursor.err("Expected to read a string starting with \" or '")
 		quote = self.str[self.idx]
 		res = ""
 		escaped = False
-		self.idx += 1
-		while self.idx < len(self.str) and (self.str[self.idx] != quote or escaped):
+		self.idx += 1 # @Note: Don't need to use "skipOne", because we know the current character is a quote
+		while self.str[self.idx] != quote or escaped:
 			c = self.str[self.idx]
 			if escaped:
 				escaped = False
 				res += c
 			else:
 				if c == '\\':
-					escaped = true
+					escaped = True
 				else:
 					res += c
-			self.idx += 1
-		assert(self.str[self.idx] == quote)
-		self.idx += 1
+			self.skipOne()
+		if self.str[self.idx] != quote:
+			if quote == "'":
+				self.err("Expected \"'\" to end the quoted string started at " + startCursor.getPos())
+		self.idx += 1 # see note above
 		return res
 
 	def strUntil(self, end: str) -> str:
+		self.expectReadable()
 		start = self.idx
 		l = len(end)
-		while self.idx < len(self.str) and self.str[self.idx:self.idx+l] != end:
-			self.idx += 1
+		while self.str[self.idx:self.idx+l] != end:
+			self.skipOne()
 		return self.str[start:self.idx]
 
 
@@ -217,6 +297,25 @@ class Element():
 			l1 = l2
 		return l1
 
+	def getFirstElementOfType(self, typ: str) -> Element|None:
+		if self.type == typ:
+			return self
+		for child in self.children:
+			if isinstance(child, Element):
+				res = child.getFirstElementOfType(typ)
+				if res is not None:
+					return res
+		return None
+
+	def getAllElementsOfType(self, typ: str) -> List[Element]:
+		res = []
+		if self.type == typ:
+			res.append(self)
+		for child in self.children:
+			if isinstance(child, Element):
+				res += child.getAllElementsOfType(typ)
+		return res
+
 	def getStrVal(self, joinStr: str = "", recursive: bool = True) -> str:
 		res = ""
 		for i in range(len(self.children)):
@@ -233,24 +332,25 @@ def xmlSkip(sb: StrBuf) -> StrBuf:
 	return sb.skipCommentsWhitespace("<!--", "-->")
 
 def parseElOrStr(sb: StrBuf) -> tuple[Element|str, StrBuf]:
-	s = sb.skipComments("<!--", "-->").strUntil('<')
+	s = xmlSkip(sb).strUntil('<')
 	if len(s):
 		return (s, sb)
 	else:
 		return parseElement(sb)
 
 def parseElement(sb: StrBuf) -> tuple[Element, StrBuf]:
-	assert(sb.read() == '<')
+	sb.readExpected('<')
 	xmlSkip(sb)
 	el = Element(sb.alphaStrNumEx(':'))
 	while xmlSkip(sb).peek() not in '/>':
 		key = sb.alphaStrNumEx(":")
-		assert(xmlSkip(sb).read() == '=')
+		xmlSkip(sb).readExpected('=')
 		val = xmlSkip(sb).quotedStr()
-		assert(key not in el.attrs)
+		if key in el.attrs:
+			sb.err("The same key is not allowed to be specified twice in an XML-Element. Read duplicate key: '" + key + "'")
 		el.attrs[key] = val
 	if sb.read() == '/':
-		assert(xmlSkip(sb).read() == '>')
+		xmlSkip(sb).readExpected('>')
 		el.empty = True
 		return (el, sb)
 	else:
@@ -263,21 +363,22 @@ def parseElement(sb: StrBuf) -> tuple[Element, StrBuf]:
 			sb = xmlSkip(sb)
 		sb.read(2)
 		sb = xmlSkip(sb)
-		assert(el.type == sb.alphaStrNumEx(":"))
+		endType = sb.alphaStrNumEx(":")
+		if el.type != endType:
+			sb.err(f"Unexpected end-element. Expected </{el.type}>, but received: </{endType}>")
 		sb = xmlSkip(sb)
-		assert(sb.read() == ">")
+		sb.readExpected('>')
 	return (el, sb)
 
 def parseStrBuf(sb: StrBuf) -> Element:
 	sb = xmlSkip(sb)
 	el, sb = parseElOrStr(sb)
 	sb = xmlSkip(sb)
-	assert(sb.isDone())
+	sb.expectDone()
 	return el
 
 def parseStr(s: str) -> Element:
 	return parseStrBuf(StrBuf(s))
 
 def parseFile(fname: str) -> Element:
-	with open(fname, "r", encoding="utf8") as f:
-		return parseStrBuf(StrBuf(f.read()))
+	return parseStrBuf(StrBuf.fromFile(fname))
