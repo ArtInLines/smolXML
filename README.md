@@ -6,7 +6,7 @@ This is barely tested, doesn't check whether the provided XML document is valid 
 
 ## How to use
 
-For a simple example, see also [test/test.py](./test/test.py).
+For a simple example, see also [test.py](./test.py).
 
 0. Import the library into your script
 
