@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import List
 
 # @TODO: Currently, any whitespace strings that are children of xml elements just get ignored. This is not desired, but not a huge issue atm
 
@@ -12,7 +13,7 @@ class Cursor():
 		self.row  = row
 
 	def getPos(self) -> str:
-		return f"{self.col}:{self.row}"
+		return str(self.col) + ":" + str(self.row)
 
 	def err(self, msg: str):
 		if self.file != "":
@@ -26,10 +27,10 @@ class StrBuf():
 	idx:  int = 0
 	bol:  int = 0
 	col:  int = 1
-	str:  str = ""
+	text: str = ""
 	file: str = ""
-	def __init__(self, str: str):
-		self.str = str
+	def __init__(self, text: str):
+		self.text = text
 
 	@staticmethod
 	def fromFile(fname: str) -> StrBuf:
@@ -46,7 +47,7 @@ class StrBuf():
 		self.getCursor().err(msg)
 
 	def isDone(self) -> bool:
-		return self.idx >= len(self.str)
+		return self.idx >= len(self.text)
 
 	def expectDone(self, expected: bool = True) -> StrBuf:
 		if self.isDone() != expected:
@@ -54,17 +55,17 @@ class StrBuf():
 		return self
 
 	def expectReadable(self, n: int = 1) -> StrBuf:
-		if self.idx + n > len(self.str):
+		if self.idx + n > len(self.text):
 			self.err("File ended unexpectedly")
 		return self
 
 	def peek(self, n: int = 1) -> str:
 		self.expectReadable(n)
-		return self.str[self.idx:self.idx+n]
+		return self.text[self.idx:self.idx+n]
 
 	def skipOne(self) -> StrBuf:
 		self.expectReadable()
-		if self.str[self.idx] == '\n':
+		if self.text[self.idx] == '\n':
 			self.col += 1
 			self.bol = self.idx + 1
 		self.idx += 1
@@ -88,63 +89,63 @@ class StrBuf():
 		return self
 
 	def skipWhitespace(self) -> StrBuf:
-		while self.idx < len(self.str) and self.str[self.idx].isspace():
+		while self.idx < len(self.text) and self.text[self.idx].isspace():
 			self.skipOne()
 		return self
 
 	# @TODO: Make sure this logs an error if "end" wasn't found
 	def skipUntil(self, end: str) -> StrBuf:
 		l = len(end)
-		while self.idx < len(self.str) and self.str[self.idx:self.idx+l] != end:
+		while self.idx < len(self.text) and self.text[self.idx:self.idx+l] != end:
 			self.skipOne()
-		if self.idx < len(self.str):
+		if self.idx < len(self.text):
 			self.skip(l)
 		return self
 
 	def skipComments(self, start: str, end: str) -> StrBuf:
 		l = len(start)
 		cont = True
-		while self.idx < len(self.str) and self.str[self.idx:self.idx+l] == start:
+		while self.idx < len(self.text) and self.text[self.idx:self.idx+l] == start:
 			self.skip(l)
 			self.skipUntil(end)
 		return self
 
 	def skipCommentsWhitespace(self, start: str, end: str) -> StrBuf:
 		i = -1
-		while self.idx < len(self.str) and i != self.idx:
+		while self.idx < len(self.text) and i != self.idx:
 			i = self.idx
 			self.skipWhitespace()
 			self.skipComments(start, end)
 		return self
 
-	def alphaStrNumEx(self, allowedChars: str) -> str:
+	def alphaNumericEx(self, allowedChars: str) -> str:
 		start = self.idx
-		while self.idx < len(self.str) and self.str[self.idx].isalpha() or self.str[self.idx].isdigit() or self.str[self.idx] in allowedChars:
+		while self.idx < len(self.text) and self.text[self.idx].isalpha() or self.text[self.idx].isdigit() or self.text[self.idx] in allowedChars:
 			self.skipOne()
-		res = self.str[start:self.idx]
+		res = self.text[start:self.idx]
 		if res == "":
 			msg = "Expected an alphanumeric string, but "
-			if self.idx >= len(self.str):
+			if self.idx >= len(self.text):
 				msg += "found end of file instead"
 			else:
-				msg += "found '" + self.str[self.idx] + "' instead"
+				msg += "found '" + self.text[self.idx] + "' instead"
 			self.err(msg)
 		return res
 
-	def alphaNumStr(self) -> str:
-		return self.alphaStrNumEx("")
+	def alphaNumeric(self) -> str:
+		return self.alphaNumericEx("")
 
 	def quotedStr(self) -> str:
 		self.expectReadable()
 		startCursor = self.getCursor()
-		if self.str[self.idx] not in ('"', "'"):
+		if self.text[self.idx] not in ('"', "'"):
 			startCursor.err("Expected to read a string starting with \" or '")
-		quote = self.str[self.idx]
+		quote = self.text[self.idx]
 		res = ""
 		escaped = False
 		self.idx += 1 # @Note: Don't need to use "skipOne", because we know the current character is a quote
-		while self.str[self.idx] != quote or escaped:
-			c = self.str[self.idx]
+		while self.text[self.idx] != quote or escaped:
+			c = self.text[self.idx]
 			if escaped:
 				escaped = False
 				res += c
@@ -154,7 +155,7 @@ class StrBuf():
 				else:
 					res += c
 			self.skipOne()
-		if self.str[self.idx] != quote:
+		if self.text[self.idx] != quote:
 			if quote == "'":
 				self.err("Expected \"'\" to end the quoted string started at " + startCursor.getPos())
 		self.idx += 1 # see note above
@@ -164,9 +165,9 @@ class StrBuf():
 		self.expectReadable()
 		start = self.idx
 		l = len(end)
-		while self.str[self.idx:self.idx+l] != end:
+		while self.text[self.idx:self.idx+l] != end:
 			self.skipOne()
-		return self.str[start:self.idx]
+		return self.text[start:self.idx]
 
 
 class Element():
@@ -175,10 +176,10 @@ class Element():
 	children: list[Element|str] = []
 	empty: bool = False
 	def __init__(self, type: str):
-		self.type = type
-		self.attrs = {}
+		self.type     = type
+		self.attrs    = {}
 		self.children = []
-		self.empty = False
+		self.empty    = False
 
 	def __repr__(self):
 		return self.__str__()
@@ -254,7 +255,7 @@ class Element():
 			return s
 
 	def getFirstChildIndexByName(self, name: str) -> int:
-		for i in len(self.children):
+		for i in range(len(self.children)):
 			child = self.children[i]
 			if isinstance(child, Element) and child.type == name:
 				return i
@@ -281,7 +282,7 @@ class Element():
 			return self.getFirstChildByName(path)
 		o = self
 		for name in path:
-			o = getFirstChildByName(name)
+			o = o.getFirstChildByName(name) # type: ignore
 			if o == None:
 				return None
 		return o
@@ -328,6 +329,8 @@ class Element():
 		return res
 
 
+XML_NAME_ALLOWED_CHARS = ":-_"
+
 def xmlSkip(sb: StrBuf) -> StrBuf:
 	return sb.skipCommentsWhitespace("<!--", "-->")
 
@@ -341,9 +344,9 @@ def parseElOrStr(sb: StrBuf) -> tuple[Element|str, StrBuf]:
 def parseElement(sb: StrBuf) -> tuple[Element, StrBuf]:
 	sb.readExpected('<')
 	xmlSkip(sb)
-	el = Element(sb.alphaStrNumEx(':'))
+	el = Element(sb.alphaNumericEx(XML_NAME_ALLOWED_CHARS))
 	while xmlSkip(sb).peek() not in '/>':
-		key = sb.alphaStrNumEx(":")
+		key = sb.alphaNumericEx(XML_NAME_ALLOWED_CHARS)
 		xmlSkip(sb).readExpected('=')
 		val = xmlSkip(sb).quotedStr()
 		if key in el.attrs:
@@ -363,7 +366,7 @@ def parseElement(sb: StrBuf) -> tuple[Element, StrBuf]:
 			sb = xmlSkip(sb)
 		sb.read(2)
 		sb = xmlSkip(sb)
-		endType = sb.alphaStrNumEx(":")
+		endType = sb.alphaNumericEx(XML_NAME_ALLOWED_CHARS)
 		if el.type != endType:
 			sb.err(f"Unexpected end-element. Expected </{el.type}>, but received: </{endType}>")
 		sb = xmlSkip(sb)
@@ -375,7 +378,9 @@ def parseStrBuf(sb: StrBuf) -> Element:
 	el, sb = parseElOrStr(sb)
 	sb = xmlSkip(sb)
 	sb.expectDone()
-	return el
+	if isinstance(el, str):
+		sb.err("Expected XML, but found only a string '" + el + "'")
+	return el # type: ignore
 
 def parseStr(s: str) -> Element:
 	return parseStrBuf(StrBuf(s))
