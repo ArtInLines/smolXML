@@ -7,26 +7,26 @@ class Cursor():
 	file: str = ""
 	row:  int = 0
 	col:  int = 1
-	def __init__(self, file: str, col: int, row: int):
+	def __init__(self, file: str, row: int, col: int):
 		self.file = file
-		self.col  = col
 		self.row  = row
+		self.col  = col
 
 	def getPos(self) -> str:
-		return str(self.col) + ":" + str(self.row)
+		if not self.file:
+			return str(self.row) + ":" + str(self.col)
+		else:
+			return self.file + ":" + str(self.row) + ":" + str(self.col)
 
 	def err(self, msg: str):
-		if self.file != "":
-			print(f"Error at {self.file}:{self.getPos()} - {msg}")
-		else:
-			print(f"Error at {self.getPos()} - {msg}")
+		print(f"Error at {self.getPos()} - {msg}")
 		exit(1)
 
 
 class StrBuf():
 	idx:  int = 0
 	bol:  int = 0
-	col:  int = 1
+	row:  int = 1
 	text: str = ""
 	file: str = ""
 	def __init__(self, text: str):
@@ -41,7 +41,7 @@ class StrBuf():
 			return sb
 
 	def getCursor(self) -> Cursor:
-		return Cursor(self.file, self.col, self.idx - self.bol)
+		return Cursor(self.file, self.row, self.idx - self.bol)
 
 	def err(self, msg: str):
 		self.getCursor().err(msg)
@@ -66,7 +66,7 @@ class StrBuf():
 	def skipOne(self) -> StrBuf:
 		self.expectReadable()
 		if self.text[self.idx] == '\n':
-			self.col += 1
+			self.row += 1
 			self.bol = self.idx + 1
 		self.idx += 1
 		return self
@@ -158,6 +158,8 @@ class StrBuf():
 		if self.text[self.idx] != quote:
 			if quote == "'":
 				self.err("Expected \"'\" to end the quoted string started at " + startCursor.getPos())
+			else:
+				self.err("Expected '\"' to end the quoted string started at " + startCursor.getPos())
 		self.idx += 1 # see note above
 		return res
 
